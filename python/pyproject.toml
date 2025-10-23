@@ -1,0 +1,16 @@
+[project]
+name = "compehnd"
+version = "0.0.1"
+description = "Personal Exposure Health Registry"
+readme = "README.md"
+authors = [
+    { name = "Gertjan Bisschop", email = "gertjan.bisschop@vito.be" },
+    { name = "Dirk Devriendt", email = "dirk.devriendt@vito.be" },
+    { name = "Caio Mescouto", email = "caio.mescouto@vito.be" },
+]
+requires-python = ">=3.10"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
