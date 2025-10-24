@@ -48,4 +48,4 @@ jobs:
       run: uv pip install ruff
 
     - name: Run format diff
-      run: un run ruff format . --diff
+      run: uv run ruff format . --diff
