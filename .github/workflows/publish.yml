@@ -43,8 +43,8 @@ jobs:
 
       - name: Test package import
         run: |
-          python -c "import pypeh; print('Successfully imported pypeh')"
-          python -c "from pypeh import Session; print('Session class importable')"
+          python -c "import compehndly; print('Successfully imported compehndly')"
+          python -c "from compehndly import Session; print('Session class importable')"
 
       - name: Check package metadata
         run: |
