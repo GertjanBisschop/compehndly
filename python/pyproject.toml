@@ -9,11 +9,15 @@ authors = [
     { name = "Caio Mescouto", email = "caio.mescouto@vito.be" },
 ]
 requires-python = ">=3.10, <4.0.0"
-dependencies = []
+dependencies = [
+	"pyarrow >= 22.0, <23.0",
+]
 
 [dependency-groups]
-test-core = [
+test = [
     "pytest>=8.2.0,<9",
+	"polars>=1.0, < 2.0",
+	"pandas>=2.0, < 3.0"
 ]
 
 dev = [
@@ -26,9 +30,28 @@ dev = [
 
 [tool.uv]
 default-groups = [
-    "test-core",
+    "test",
     "dev",
 ]
+
+[project.optional-dependencies]
+polars = [
+    "polars>=1.0,<2.0"
+]
+
+pandas = [
+    "pandas>=2.0,<3.0"
+]
+
+numpy = [
+    "numpy>=2.0"
+]
+
+[project.entry-points."compehndly.adapters"]
+polars = "compehndly.adapters.polars_adapter:PolarsAdapter"
+pandas = "compehndly.adapters.pandas_adapter:PandasAdapter"
+numpy = "compehndly.adapters.numpy_adapter:NumpyAdapter"
+
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -55,6 +78,12 @@ pythonpath = [
 ]
 addopts = [
     "--import-mode=importlib",
+]
+markers = [
+	"base: base functionality",
+	"polars: polars dependency",
+	"numpy: numpy dependency",
+	"pandas: pandas dependency",
 ]
 
 [tool.ruff]
