@@ -1,114 +1,68 @@
-import json
 import importlib
-import os
-import pkgutil
+import logging
 
-import compehndly
-
-from pathlib import Path
+from collections import defaultdict
 from packaging.version import Version
 
-# Global manifest (in-memory) used during development / build
-_MANIFEST = {}
+from compehndly.core.conversion import arrowize_arguments
+from compehndly.adapters import _ADAPTERS
+
+logger = logging.getLogger(__name__)
+
+TO_REGISTER = ["compehndly.utils.example_function"]
 
 
-def get_registry():
-    """Return a registry; rebuild manifest if missing."""
-    manifest_path = Path(__file__).parent / "manifest.json"
-    try:
-        return LazyFunctionRegistry(manifest_path)
-    except (FileNotFoundError, json.JSONDecodeError):
-        # If explicitly building, don’t rebuild again!
-        if os.environ.get("COMPEHNDLY_BUILDING_REGISTRY") == "1":
-            raise
-        print("[Registry] Manifest missing or invalid → rebuilding...")
-        build_manifest()
-        return LazyFunctionRegistry(manifest_path)
+class FunctionRegistry:
+    def __init__(self, adapter: str | None = None):
+        self._functions = defaultdict(dict)
+        logging.debug("Running function registry")
+        if adapter is None:
+            self.adapter = _ADAPTERS["base"]
+        else:
+            if adapter not in _ADAPTERS:
+                raise ValueError(f"Unknown adapter '{adapter}'. " f"Available: {', '.join(_ADAPTERS)}")
+            self.adapter = _ADAPTERS[adapter]
 
+    def register(self, name, version, func):
+        version = Version(version)
+        if version in self._functions[name]:
+            raise ValueError(f"Function {name} version {version} already registered.")
 
-def register_function(name: str, version: str):
-    """
-    Returns a decorator that registers a function under `name`/`version`.
-    """
-
-    def decorator(func):
-        module = func.__module__
-        func_name = func.__name__
-        _MANIFEST.setdefault(name, {})[version] = {
-            "module": module,
-            "function": func_name,
-        }
-        return func
-
-    return decorator
-
-
-def walk_function_modules():
-    """Dynamically import all registry.functions.* modules to populate _MANIFEST."""
-
-    package = compehndly
-    for module_info in pkgutil.walk_packages(package.__path__, package.__name__ + "."):
-        importlib.import_module(module_info.name)
-
-
-def export_manifest(path=None):
-    """
-    Export the current in-memory manifest to JSON (for FAIR and lazy loading).
-    Run this in a build step.
-    """
-    path = Path(path or Path(__file__).parent / "registry.json")
-    with open(path, "w") as f:
-        json.dump(_MANIFEST, f, indent=2, sort_keys=True)
-    print(f"Exported manifest with {sum(len(v) for v in _MANIFEST.values())} entries to {path}")
-
-
-def build_manifest():
-    """
-    Force a manifest rebuild by scanning all function modules.
-    """
-    print("[Registry] Building manifest...")
-    walk_function_modules()
-    export_manifest()
-    print("[Registry] Manifest build complete.")
-
-
-class LazyFunctionRegistry:
-    """
-    Loads function metadata from manifest.json and lazy-loads functions on demand.
-    """
-
-    def __init__(self, manifest_path=None):
-        manifest_path = manifest_path or Path(__file__).parent / "registry.json"
-        with open(manifest_path) as f:
-            self.manifest = json.load(f)
-        self._cache = {}
+        wrapped_func = arrowize_arguments(func, adapter=self.adapter)
+        self._functions[name][version] = wrapped_func
 
     def get(self, name, version=None):
-        """Get function by name/version, lazy-importing the module if necessary."""
-        if name not in self.manifest:
-            raise KeyError(f"Function '{name}' not found in manifest.")
-
-        versions = sorted(self.manifest[name].keys(), key=Version)
-        version = str(version or versions[-1])
-        cache_key = (name, version)
-
-        if cache_key not in self._cache:
-            entry = self.manifest[name][version]
-            module = importlib.import_module(entry["module"])
-            func = getattr(module, entry["function"])
-            self._cache[cache_key] = func
-
-        return self._cache[cache_key]
-
-    def latest(self, name):
-        return self.get(name)
+        """Return the function. If version is None, return latest."""
+        if name not in self._functions:
+            raise KeyError(f"No function registered with name '{name}'")
+        versions = sorted(self._functions[name].keys())
+        if version is None:
+            version = versions[-1]
+        else:
+            version = Version(version)
+        return self._functions[name][version]
 
     def list_versions(self, name):
-        return sorted(self.manifest.get(name, {}).keys(), key=Version)
+        if name not in self._functions:
+            return []
+        return sorted(str(v) for v in self._functions[name].keys())
 
+    @classmethod
+    def build_registry(cls, _to_register=TO_REGISTER, adapter: str | None = None):
+        registry = cls(adapter=adapter)
 
-# Optional global instance (only when not in build mode)
-if os.environ.get("COMPEHNDLY_BUILDING_REGISTRY") != "1":
-    registry = get_registry()
-else:
-    registry = None
+        for module_path in _to_register:
+            try:
+                module = importlib.import_module(module_path)
+            except ImportError as e:
+                raise ImportError(f"Failed to import module '{module_path}': {e}")
+
+            if not hasattr(module, "__registrations__") or not isinstance(module.__registrations__, list):
+                continue
+
+            for registry_name, func_name, version, func in module.__registrations__:
+                if registry_name != "default":
+                    raise ValueError(f"Unsupported registry name '{registry_name}' in module '{module_path}'")
+                registry.register(func_name, version, func)
+
+        return registry
