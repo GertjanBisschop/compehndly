@@ -13,4 +13,14 @@ def register(registry_name, name, version):
     return decorator
 
 
-## TODO: ADD CORRECTION FUNCTIONS
+def _simple_bin_v0_0_1_reference(
+    *arrays: float,
+) -> float:
+    pass
+
+
+@register(registry_name="default", name="summation", version="0.0.1")
+def _simple_bin_v0_0_1_arrow(
+    array: pa.Array,
+) -> pa.Array:
+    pass
