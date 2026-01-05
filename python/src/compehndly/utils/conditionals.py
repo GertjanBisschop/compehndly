@@ -13,4 +13,4 @@ def register(registry_name, name, version):
     return decorator
 
 
-## TODO: ADD CORRECTION FUNCTIONS
+# TODO: add conditional helper functions

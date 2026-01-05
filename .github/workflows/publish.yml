@@ -61,9 +61,6 @@ jobs:
     if: github.event_name != 'pull_request'
     permissions:
       id-token: write
-    defaults:
-      run:
-        working-directory: ./python
 
     steps:
       - name: Download build artifacts
