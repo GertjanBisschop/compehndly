@@ -1,5 +1,8 @@
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+
+from compehndly.derived_variables.statsutils import fit_censored_lognorm
 
 __registrations__ = []
 
@@ -120,14 +123,73 @@ def _medium_bound_imputation_v0_0_1_arrow_array(
     return result
 
 
-def _log_norm_imputation_v0_0_1_reference(
+def _random_single_imputation_reference_v0_0_1(
     measurement: float,
     loq: float,
     lod: float | None = None,
 ) -> float:
+    # TODO:
     pass
 
 
-@register(registry_name="default", name="log_norm_imputation", version="0.0.1")
-def _log_norm_imputation_v0_0_1():
-    pass
+@register(registry_name="default", name="random_single_imputation", version="0.0.1")
+def _random_single_imputation_arrow_v0_0_1(
+    biomarker_pa: pa.Array,
+    lod: float,
+    loq: float,
+    seed: int | None = None,
+) -> pa.Array:
+    """
+    Perform random single imputation for left-censored lognormal data
+    using PyArrow arrays for maximum compatibility.
+
+    biomarker_pa : arrow array of floats or censored indicators (-1, -2, -3)
+    lod       : limit of detection
+    loq       : limit of quantification
+    """
+
+    # Convert Arrow → NumPy
+    # NOTE: suboptimal solution
+    biomarker = biomarker_pa.to_numpy(zero_copy_only=False)
+
+    # Fill NA as -1 (your original convention)
+    is_na = np.isnan(biomarker)
+    biomarker_filled = np.where(is_na, -1, biomarker)
+
+    # Censored if negative category code
+    censored = biomarker_filled < 0
+    values_np = np.where(censored, lod, biomarker_filled)
+    dist = fit_censored_lognorm(values_np, censored)
+    rng = np.random.default_rng(seed=seed)
+
+    # Compute sampling bounds (vectorized)
+    lower = np.zeros_like(biomarker_filled, dtype=float)
+    upper = np.zeros_like(biomarker_filled, dtype=float)
+
+    cat_below_lod = biomarker_filled == -1
+    cat_between = biomarker_filled == -2
+    cat_below_loq = biomarker_filled == -3
+
+    # <LOD -> [0, LOD]
+    lower[cat_below_lod] = 0
+    upper[cat_below_lod] = lod
+    # Between LOD & LOQ -> [LOD, LOQ]
+    lower[cat_between] = lod
+    upper[cat_between] = loq
+
+    # <LOQ -> [0, LOQ]
+    lower[cat_below_loq] = 0
+    upper[cat_below_loq] = loq
+
+    # Convert bounds to CDF space
+    cdf_lo = dist.cdf(lower)
+    cdf_hi = dist.cdf(upper)
+
+    # generate U ~ Uniform(cdf_lo, cdf_hi)
+    u = rng.uniform(cdf_lo, cdf_hi)
+    imputed = dist.ppf(u)
+    # replace censored with imputed
+    result = biomarker.copy()
+    result[censored] = imputed[censored]
+
+    return pa.array(result)
