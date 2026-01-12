@@ -1,6 +1,6 @@
 [project]
 name = "compehndly"
-version = "0.0.1"
+version = "0.0.1a1"
 description = "Personal Exposure Health Registry"
 readme = "README.md"
 authors = [
@@ -11,6 +11,7 @@ authors = [
 requires-python = ">=3.10, <4.0.0"
 dependencies = [
 	"pyarrow >= 22.0, <23.0",
+	"scipy",
 ]
 
 [dependency-groups]

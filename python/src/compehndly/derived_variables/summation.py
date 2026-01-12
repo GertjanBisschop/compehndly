@@ -16,9 +16,14 @@ def register(registry_name, name, version):
 
 def _summation_v0_0_1_reference(
     *arrays: float,
-) -> float:
+    all_required=True,
+) -> float | None:
     if not arrays:
         raise ValueError("At least one input array is required")
+
+    if all_required:
+        if not any(x is not None for x in arrays):
+            return None
 
     ret = 0
     for val in arrays:
@@ -29,7 +34,7 @@ def _summation_v0_0_1_reference(
 
 
 @register(registry_name="default", name="summation", version="0.0.1")
-def _summation_v0_0_1_arrow(*arrays: pa.Array) -> pa.Array:
+def _summation_v0_0_1_arrow(*arrays: pa.Array, all_required=True) -> pa.Array:
     """
     Vectorized summation over multiple Arrow arrays.
 
@@ -47,7 +52,7 @@ def _summation_v0_0_1_arrow(*arrays: pa.Array) -> pa.Array:
         if len(arr) != length:
             raise ValueError("All input arrays must have the same length")
 
-        if arr.null_count == length:
+        if arr.null_count == length and all_required:
             return pa.nulls(length, type=pa.float64())
 
     result = pc.fill_null(arrays[0], 0)
