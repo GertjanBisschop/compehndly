@@ -7,6 +7,22 @@ from compehndly import apply
 
 @pytest.mark.derived
 class TestImputation:
+    @staticmethod
+    def _assert_same_values(left: pl.Series, right: pl.Series):
+        assert left.null_count() == right.null_count()
+        assert len(left) == len(right)
+        for left_value, right_value in zip(
+            left.to_list(), right.to_list(), strict=True
+        ):
+            if (
+                isinstance(left_value, float)
+                and isinstance(right_value, float)
+                and np.isnan(left_value)
+                and np.isnan(right_value)
+            ):
+                continue
+            assert left_value == right_value
+
     def test_lab_sensitivity_dichotomization_basic(self):
         df = pl.DataFrame(
             {
@@ -26,6 +42,32 @@ class TestImputation:
 
         out_np = out.to_numpy()
         assert out_np.tolist() == [True, True, True, True, False, False, False]
+
+    def test_lab_sensitivity_dichotomization_nulls_match_expr(self):
+        df = pl.DataFrame(
+            {
+                "measurement": [None, 0.5, 0.5, 0.5],
+                "lod": [1.0, None, 1.0, None],
+                "loq": [2.0, 2.0, None, None],
+            }
+        )
+
+        series_out = apply(
+            "lab_sensitivity_dichotomization",
+            measurement=df["measurement"],
+            lod=df["lod"],
+            loq=df["loq"],
+        )
+        expr = apply(
+            "lab_sensitivity_dichotomization",
+            measurement=pl.col("measurement"),
+            lod=pl.col("lod"),
+            loq=pl.col("loq"),
+        )
+        expr_out = df.lazy().select(expr.alias("out")).collect()["out"]
+
+        assert series_out.to_list() == [None, True, True, None]
+        self._assert_same_values(series_out, expr_out)
 
     def test_random_single_imputation_basic(self):
         biomarker = pl.Series([5.0, -1.0, -2.0, 10.0, -3.0, 8.0])
@@ -132,6 +174,35 @@ class TestImputation:
         assert 0 <= out_np[2] <= 6.0
         assert out_np[3:].tolist() == [5.0, 6.0, 7.0, 8.0]
 
+    def test_random_single_imputation_nulls_and_boundaries_match_expr(self):
+        df = pl.DataFrame(
+            {
+                "biomarker": [None, -1.0, -2.0, -3.0, 5.0, 6.0, 7.0],
+                "lod": [2.0, None, 2.0, 2.0, 2.0, 2.0, 2.0],
+                "loq": [4.0, 4.0, None, None, 4.0, 4.0, 4.0],
+            }
+        )
+
+        series_out = apply(
+            "random_single_imputation",
+            biomarker=df["biomarker"],
+            lod=df["lod"],
+            loq=df["loq"],
+            seed=42,
+        )
+        expr = apply(
+            "random_single_imputation",
+            biomarker=pl.col("biomarker"),
+            lod=pl.col("lod"),
+            loq=pl.col("loq"),
+            seed=42,
+        )
+        expr_out = df.lazy().select(expr.alias("out")).collect()["out"]
+
+        assert series_out[:4].to_list() == [None, None, None, None]
+        assert series_out[4:].to_list() == [5.0, 6.0, 7.0]
+        self._assert_same_values(series_out, expr_out)
+
     def test_random_single_imputation_insufficient_observed_values(self):
         biomarker = pl.Series([5.0, -1.0, -2.0, -1.0, -3.0, -2.0])
         lod = 2.0
@@ -203,6 +274,52 @@ class TestImputation:
         expected = np.array([0.5, 1.5, 2.5])
         assert np.allclose(out.to_numpy(), expected, equal_nan=True)
 
+    def test_medium_bound_imputation_scalar_input_null_matches_expr(self):
+        df = pl.DataFrame({"measurement": [0.2, None, 2.5]})
+
+        series_out = apply(
+            "medium_bound_imputation_scalar_input",
+            df["measurement"],
+            loq=2.0,
+            lod=1.0,
+        )
+        expr = apply(
+            "medium_bound_imputation_scalar_input",
+            pl.col("measurement"),
+            loq=2.0,
+            lod=1.0,
+        )
+        expr_out = df.lazy().select(expr.alias("out")).collect()["out"]
+
+        assert series_out.to_list() == [0.5, None, 2.5]
+        self._assert_same_values(series_out, expr_out)
+
+    def test_medium_bound_imputation_null_thresholds_match_expr(self):
+        df = pl.DataFrame(
+            {
+                "measurement": [0.2, None, 0.2, 0.2],
+                "lod": [1.0, 1.0, None, None],
+                "loq": [2.0, 2.0, 2.0, None],
+            }
+        )
+
+        series_out = apply(
+            "medium_bound_imputation",
+            measurement=df["measurement"],
+            lod=df["lod"],
+            loq=df["loq"],
+        )
+        expr = apply(
+            "medium_bound_imputation",
+            measurement=pl.col("measurement"),
+            lod=pl.col("lod"),
+            loq=pl.col("loq"),
+        )
+        expr_out = df.lazy().select(expr.alias("out")).collect()["out"]
+
+        assert series_out.to_list() == [0.5, None, 1.0, None]
+        self._assert_same_values(series_out, expr_out)
+
     def test_bin_decoding_series_replaces_filter_values(self):
         out = apply(
             "bin_decoding",
@@ -214,6 +331,32 @@ class TestImputation:
         )
 
         assert out.to_list() == [10.0, 1.25, 80.0, 4.5, -2.0]
+
+    def test_bin_decoding_nulls_match_expr(self):
+        df = pl.DataFrame(
+            {
+                "values": [None, -1.0, -1.0, float("nan")],
+                "copy": [10.0, None, 20.0, 30.0],
+            }
+        )
+
+        series_out = apply(
+            "bin_decoding",
+            values=df["values"],
+            filter_value_1=-1.0,
+            copy_from_1=df["copy"],
+        )
+        expr = apply(
+            "bin_decoding",
+            values=pl.col("values"),
+            filter_value_1=-1.0,
+            copy_from_1=pl.col("copy"),
+        )
+        expr_out = df.lazy().select(expr.alias("out")).collect()["out"]
+
+        assert series_out[:3].to_list() == [None, None, 20.0]
+        assert np.isnan(series_out[3])
+        self._assert_same_values(series_out, expr_out)
 
     def test_bin_decoding_expr_accepts_variable_filter_count(
         self,

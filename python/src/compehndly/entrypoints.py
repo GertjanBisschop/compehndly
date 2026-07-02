@@ -139,7 +139,7 @@ def standardize_lipid(
 
 def medium_bound_imputation_scalar_input(
     measurement: pl.Series,
-    loq: float,
+    loq: float | None = None,
     lod: float | None = None,
 ) -> pl.Series:
     return _MEDIUM_BOUND_IMPUTATION_SCALAR_INPUT(
@@ -151,7 +151,7 @@ def medium_bound_imputation_scalar_input(
 
 def medium_bound_imputation(
     measurement: pl.Series,
-    loq: pl.Series,
+    loq: pl.Series | None = None,
     lod: pl.Series | None = None,
 ) -> pl.Series:
     return _MEDIUM_BOUND_IMPUTATION(
@@ -174,8 +174,8 @@ def bin_decoding(
 
 def random_single_imputation(
     biomarker: pl.Series,
-    lod: pl.Series,
-    loq: pl.Series,
+    lod: pl.Series | None = None,
+    loq: pl.Series | None = None,
     min_unique_values: int = 0,
     min_observed_percentage: int = 0,
     seed: int | None = None,
@@ -192,8 +192,8 @@ def random_single_imputation(
 
 def random_single_imputation_scalar_input(
     biomarker: pl.Series,
-    lod: float,
-    loq: float,
+    lod: float | None = None,
+    loq: float | None = None,
     min_unique_values: int = 0,
     min_observed_percentage: int = 0,
     seed: int | None = None,
