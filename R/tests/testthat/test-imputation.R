@@ -21,13 +21,13 @@ test_that("medium_bound_imputation follows decision table", {
   measurements <- c(-10, -3, -2, -1, 0.5, 1.5, 3)
   out <- compehndly_apply(
     "medium_bound_imputation",
-    measurement = polars::pl$Series(rep(measurements, 4)),
-    lod = polars::pl$Series(c(rep(NA_real_, 7), rep(1, 7), rep(NA_real_, 7), rep(1, 7))),
-    loq = polars::pl$Series(c(rep(NA_real_, 14), rep(2, 14)))
+    measurement = test_series(rep(measurements, 4)),
+    lod = test_series(c(rep(NA_real_, 7), rep(1, 7), rep(NA_real_, 7), rep(1, 7))),
+    loq = test_series(c(rep(NA_real_, 14), rep(2, 14)))
   )
 
   expect_equal(
-    to_numeric_with_na(out$to_list()),
+    to_numeric_with_na(series_values(out)),
     c(
       rep(NA_real_, 7),
       NA_real_, NA_real_, NA_real_, 0.5, 0.5, 1.5, 3,
@@ -43,13 +43,13 @@ test_that("lab_sensitivity_dichotomization follows decision table", {
   measurements <- c(-10, -3, -2, -1, 0.5, 1.5, 3)
   out <- compehndly_apply(
     "lab_sensitivity_dichotomization",
-    measurement = polars::pl$Series(rep(measurements, 4)),
-    lod = polars::pl$Series(c(rep(NA_real_, 7), rep(1, 7), rep(NA_real_, 7), rep(1, 7))),
-    loq = polars::pl$Series(c(rep(NA_real_, 14), rep(2, 14)))
+    measurement = test_series(rep(measurements, 4)),
+    lod = test_series(c(rep(NA_real_, 7), rep(1, 7), rep(NA_real_, 7), rep(1, 7))),
+    loq = test_series(c(rep(NA_real_, 14), rep(2, 14)))
   )
 
   expect_equal(
-    to_logical_with_na(out$to_list()),
+    to_logical_with_na(series_values(out)),
     c(
       rep(NA, 7),
       NA, NA, NA, FALSE, FALSE, TRUE, TRUE,
@@ -65,12 +65,12 @@ test_that("random_single_imputation follows null and bound decisions", {
   measurements <- c(-10, -3, -2, -1, 0.5, 1.5, 3)
   out <- compehndly_apply(
     "random_single_imputation",
-    biomarker = polars::pl$Series(rep(measurements, 4)),
-    lod = polars::pl$Series(c(rep(NA_real_, 7), rep(1, 7), rep(NA_real_, 7), rep(1, 7))),
-    loq = polars::pl$Series(c(rep(NA_real_, 14), rep(2, 14))),
+    biomarker = test_series(rep(measurements, 4)),
+    lod = test_series(c(rep(NA_real_, 7), rep(1, 7), rep(NA_real_, 7), rep(1, 7))),
+    loq = test_series(c(rep(NA_real_, 14), rep(2, 14))),
     .params = list(seed = 42)
   )
-  values <- to_numeric_with_na(out$to_list())
+  values <- to_numeric_with_na(series_values(out))
 
   expect_true(all(is.na(values[1:7])))
   expect_true(all(is.na(values[8:10])))

@@ -5,7 +5,7 @@ Version: 0.0.1
 Authors@R: c(
     person("Gertjan", "Bisschop", email = "gertjan.bisschop@vito.be", role = c("aut", "cre")),
     person("Caio", "Mescouto", email = "caio.mescouto@vito.be", role = "aut")
-)
+    )
 Description: Polars-based derived variable functions aligned with the Python implementation.
 License: MIT + file LICENSE
 Encoding: UTF-8

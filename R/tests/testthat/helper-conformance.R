@@ -2,7 +2,8 @@ conformance_file_path <- function() {
   candidates <- c(
     file.path("shared", "conformance", "derived_variables_cases.json"),
     file.path("..", "shared", "conformance", "derived_variables_cases.json"),
-    file.path("..", "..", "shared", "conformance", "derived_variables_cases.json")
+    file.path("..", "..", "shared", "conformance", "derived_variables_cases.json"),
+    file.path("..", "..", "..", "shared", "conformance", "derived_variables_cases.json")
   )
 
   for (p in candidates) {
@@ -11,7 +12,13 @@ conformance_file_path <- function() {
     }
   }
 
-  normalizePath(candidates[[1]], mustWork = FALSE)
+  stop(
+    sprintf(
+      "Could not locate shared conformance vectors. Tried: %s",
+      paste(normalizePath(candidates, mustWork = FALSE), collapse = ", ")
+    ),
+    call. = FALSE
+  )
 }
 
 to_numeric_with_na <- function(x) {
@@ -23,4 +30,12 @@ to_numeric_with_na <- function(x) {
     },
     numeric(1)
   )
+}
+
+test_series <- function(values) {
+  polars::pl$Series("", values)
+}
+
+series_values <- function(x) {
+  as.vector(x)
 }

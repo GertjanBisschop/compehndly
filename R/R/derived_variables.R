@@ -12,7 +12,7 @@
 
 .series_to_list <- function(x) {
   if (is.null(x)) return(NULL)
-  x$to_list()
+  as.vector(x)
 }
 
 .series_to_numeric <- function(x) {
@@ -52,13 +52,13 @@
     return(as.numeric(x[[1]]))
   }
 
-  if (is.environment(x) && !is.null(x$to_list)) {
-    vals <- x$to_list()
+  if (.is_polars_series(x)) {
+    vals <- .series_to_list(x)
     if (length(vals) == 0) {
       stop(sprintf("Parameter '%s' must contain at least one value", name), call. = FALSE)
     }
     first <- vals[[1]]
-    if (is.null(first)) {
+    if (is.null(first) || is.na(first)) {
       stop(sprintf("Parameter '%s' cannot be null", name), call. = FALSE)
     }
     return(as.numeric(first))
@@ -72,11 +72,11 @@
 }
 
 .is_polars_series <- function(x) {
-  is.environment(x) && !is.null(x$to_list)
+  inherits(x, "polars_series")
 }
 
 .to_series <- function(values) {
-  polars::pl$Series(values)
+  polars::pl$Series("", values)
 }
 
 .validate_same_length <- function(...) {
@@ -101,7 +101,7 @@
 }
 
 .is_series_like <- function(x) {
-  is.environment(x) && !is.null(x$to_list)
+  .is_polars_series(x)
 }
 
 .split_named_weighted_inputs <- function(values_by_name) {
