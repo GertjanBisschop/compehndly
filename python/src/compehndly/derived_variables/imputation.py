@@ -20,8 +20,8 @@ def _validate_scalar_thresholds(
     if lod is not None:
         if lod <= 0:
             raise ValueError("lod must be > 0")
-        if loq is not None and lod >= loq:
-            raise ValueError("lod must be < loq")
+        if loq is not None and lod > loq:
+            raise ValueError("lod must be <= loq")
 
 
 def _threshold_array(value: float | None, length: int) -> np.ndarray:
