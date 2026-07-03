@@ -232,18 +232,73 @@
   list(sigma = fit$par[[1]], mu = fit$par[[2]])
 }
 
-.validate_thresholds <- function(loq, lod = NULL) {
-  if (loq <= 0) {
+.validate_thresholds <- function(loq = NULL, lod = NULL) {
+  if (is.null(loq) && is.null(lod)) {
+    stop("at least one of lod or loq must be provided", call. = FALSE)
+  }
+
+  if (!is.null(loq) && loq <= 0) {
     stop("loq must be > 0", call. = FALSE)
   }
   if (!is.null(lod)) {
     if (lod <= 0) {
       stop("lod must be > 0", call. = FALSE)
     }
-    if (lod >= loq) {
-      stop("lod must be < loq", call. = FALSE)
+    if (!is.null(loq) && lod > loq) {
+      stop("lod must be <= loq", call. = FALSE)
     }
   }
+}
+
+.threshold_vector <- function(value, n) {
+  if (is.null(value)) rep(NA_real_, n) else rep(value, n)
+}
+
+.measurement_masks <- function(values) {
+  present <- !is.na(values)
+  not_measured <- present & values == -10
+  below_lod <- present & values == -1
+  between_lod_loq <- present & values == -2
+  below_loq <- present & values == -3
+  known_code <- not_measured | below_lod | between_lod_loq | below_loq
+
+  list(
+    not_measured = not_measured,
+    below_lod = below_lod,
+    between_lod_loq = between_lod_loq,
+    below_loq = below_loq,
+    decimal = present & values >= 0,
+    invalid_negative = present & values < 0 & !known_code
+  )
+}
+
+.unsupported_code_mask <- function(masks, has_lod, has_loq) {
+  (masks$below_lod & !has_lod) |
+    (masks$between_lod_loq & !(has_lod & has_loq)) |
+    (masks$below_loq & (has_lod | !has_loq))
+}
+
+.result_null_mask <- function(values, has_any_limit, masks, unsupported_code) {
+  is.na(values) |
+    !has_any_limit |
+    masks$not_measured |
+    masks$invalid_negative |
+    unsupported_code
+}
+
+.censoring_masks <- function(values, lod_v, loq_v, masks, has_lod, has_loq) {
+  list(
+    below_lod = (masks$below_lod & has_lod) |
+      (masks$decimal & has_lod & values < lod_v),
+    between_lod_loq = (masks$between_lod_loq & has_lod & has_loq) |
+      (masks$decimal & has_lod & has_loq & values >= lod_v & values < loq_v),
+    below_loq = (masks$below_loq & !has_lod & has_loq) |
+      (masks$decimal & !has_lod & has_loq & values < loq_v)
+  )
+}
+
+.any_censored <- function(censored) {
+  censored$below_lod | censored$between_lod_loq | censored$below_loq
 }
 
 # ---------------- Derived Variable Implementations ----------------
@@ -392,6 +447,9 @@
     out <- out * as.numeric(scalar_factor)
   }
 
+  .to_series(out)
+}
+
 .dv_weighted_summation <- function(..., all_required = TRUE, cutoff = NULL) {
   split_inputs <- .split_named_weighted_inputs(list(...))
   vectors_by_name <- lapply(split_inputs$series, .series_to_numeric)
@@ -445,54 +503,82 @@
   .dv_standardize(measured = measured, standard = lipid_value)
 }
 
-.dv_medium_bound_imputation_scalar_input <- function(measurement, loq, lod = NULL) {
-  loq_num <- .as_scalar_numeric(loq, "loq")
-  lod_num <- if (is.null(lod)) NULL else .as_scalar_numeric(lod, "lod")
-  .validate_thresholds(loq_num, lod_num)
-
-  m <- .series_to_numeric(measurement)
-  out <- m
-
-  if (is.null(lod_num)) {
-    mask <- !is.na(m) & (m < loq_num)
-    out[mask] <- loq_num / 2
-    return(.to_series(out))
+.dv_lab_sensitivity_dichotomization <- function(measurement, loq = NULL, lod = NULL) {
+  if (is.null(loq) && is.null(lod)) {
+    stop("at least one of lod or loq must be provided", call. = FALSE)
   }
 
-  mask_below_lod <- !is.na(m) & (m < lod_num)
-  out[mask_below_lod] <- lod_num / 2
+  m <- .series_to_numeric(measurement)
+  loq_v <- if (is.null(loq)) rep(NA_real_, length(m)) else .series_to_numeric(loq)
+  lod_v <- if (is.null(lod)) rep(NA_real_, length(m)) else .series_to_numeric(lod)
 
-  midpoint <- (lod_num + loq_num) / 2
-  mask_between <- !is.na(m) & (m >= lod_num) & (m < loq_num)
-  out[mask_between] <- midpoint
+  .validate_same_length(m, loq_v, lod_v)
+
+  has_lod <- !is.na(lod_v)
+  has_loq <- !is.na(loq_v)
+  has_any_limit <- has_lod | has_loq
+  masks <- .measurement_masks(m)
+
+  threshold <- ifelse(has_loq, loq_v, lod_v)
+  out <- masks$decimal & has_any_limit & m >= threshold
+  unsupported_code <- .unsupported_code_mask(masks, has_lod, has_loq)
+  out[.result_null_mask(m, has_any_limit, masks, unsupported_code)] <- NA
 
   .to_series(out)
 }
 
-.dv_medium_bound_imputation <- function(measurement, loq, lod = NULL) {
+.medium_bound_imputation_from_vectors <- function(measurement_v, lod_v, loq_v) {
+  has_lod <- !is.na(lod_v)
+  has_loq <- !is.na(loq_v)
+  has_any_limit <- has_lod | has_loq
+  masks <- .measurement_masks(measurement_v)
+  censored <- .censoring_masks(measurement_v, lod_v, loq_v, masks, has_lod, has_loq)
+
+  out <- measurement_v
+  out[censored$below_lod] <- lod_v[censored$below_lod] / 2
+  out[censored$between_lod_loq] <- (lod_v[censored$between_lod_loq] + loq_v[censored$between_lod_loq]) / 2
+  out[censored$below_loq] <- loq_v[censored$below_loq] / 2
+
+  unsupported_code <- .unsupported_code_mask(masks, has_lod, has_loq)
+  out[.result_null_mask(measurement_v, has_any_limit, masks, unsupported_code)] <- NA_real_
+  out
+}
+
+.dv_medium_bound_imputation_scalar_input <- function(measurement, loq = NULL, lod = NULL) {
+  loq_num <- if (is.null(loq)) NULL else .as_scalar_numeric(loq, "loq")
+  lod_num <- if (is.null(lod)) NULL else .as_scalar_numeric(lod, "lod")
+  .validate_thresholds(loq = loq_num, lod = lod_num)
+
   m <- .series_to_numeric(measurement)
-  loq_v <- .series_to_numeric(loq)
-  lod_v <- if (is.null(lod)) NULL else .series_to_numeric(lod)
+  .to_series(.medium_bound_imputation_from_vectors(
+    measurement_v = m,
+    lod_v = .threshold_vector(lod_num, length(m)),
+    loq_v = .threshold_vector(loq_num, length(m))
+  ))
+}
 
-  .validate_same_length(m, loq_v)
-  if (!is.null(lod_v)) .validate_same_length(m, lod_v)
-
-  out <- m
-
-  if (is.null(lod_v)) {
-    mask <- !is.na(m) & !is.na(loq_v) & (m < loq_v)
-    out[mask] <- loq_v[mask] / 2
-    return(.to_series(out))
+.dv_medium_bound_imputation <- function(measurement, loq = NULL, lod = NULL) {
+  if (is.null(loq) && is.null(lod)) {
+    stop("at least one of lod or loq must be provided", call. = FALSE)
   }
 
-  mask_below_lod <- !is.na(m) & !is.na(lod_v) & (m < lod_v)
-  out[mask_below_lod] <- lod_v[mask_below_lod] / 2
+  m <- .series_to_numeric(measurement)
+  loq_v <- if (is.null(loq)) rep(NA_real_, length(m)) else .series_to_numeric(loq)
+  lod_v <- if (is.null(lod)) NULL else .series_to_numeric(lod)
 
-  midpoint <- (lod_v + loq_v) / 2
-  mask_between <- !is.na(m) & !is.na(lod_v) & !is.na(loq_v) & (m >= lod_v) & (m < loq_v)
-  out[mask_between] <- midpoint[mask_between]
+  lod_v <- if (is.null(lod_v)) rep(NA_real_, length(m)) else lod_v
 
-  .to_series(out)
+  .validate_same_length(m, loq_v, lod_v)
+
+  if (any((!is.na(lod_v) & lod_v <= 0) | (!is.na(loq_v) & loq_v <= 0) | (!is.na(lod_v) & !is.na(loq_v) & lod_v >= loq_v))) {
+    stop("lod values must be > 0 and < loq values", call. = FALSE)
+  }
+
+  .to_series(.medium_bound_imputation_from_vectors(
+    measurement_v = m,
+    lod_v = lod_v,
+    loq_v = loq_v
+  ))
 }
 
 .parse_bin_decoding_pairs <- function(args) {
@@ -635,33 +721,61 @@
   .to_series(out)
 }
 
-.random_single_imputation_from_vectors <- function(biomarker_np, lod_v, loq_v, seed = NULL) {
-  biomarker_filled <- ifelse(is.na(biomarker_np), -1, biomarker_np)
+.random_single_imputation_from_vectors <- function(
+  biomarker_np,
+  lod_v,
+  loq_v,
+  seed = NULL,
+  min_unique_values = 0,
+  min_observed_percentage = 0
+) {
+  has_lod <- !is.na(lod_v)
+  has_loq <- !is.na(loq_v)
+  has_any_limit <- has_lod | has_loq
+  masks <- .measurement_masks(biomarker_np)
+  censored <- .censoring_masks(biomarker_np, lod_v, loq_v, masks, has_lod, has_loq)
+  censored_any <- .any_censored(censored)
 
-  censored <- biomarker_filled < 0
-  values_np <- ifelse(censored, lod_v, biomarker_filled)
+  unsupported_code <- .unsupported_code_mask(masks, has_lod, has_loq)
+  result_null <- .result_null_mask(biomarker_np, has_any_limit, masks, unsupported_code)
+  observed <- masks$decimal & has_any_limit & !censored_any & !result_null
 
-  fit <- .fit_censored_lognorm(values_np, censored)
+  threshold <- ifelse(has_loq, loq_v, lod_v)
+  count_above_lod_loq <- sum(observed & biomarker_np >= threshold)
+  denominator <- sum(!result_null)
+
+  checks_failed <- denominator == 0 ||
+    count_above_lod_loq < denominator / 100 * min_observed_percentage
+
+  if (!checks_failed) {
+    above_lod_loq <- observed & biomarker_np >= threshold
+    count_unique_values_above_lod_loq <- length(unique(biomarker_np[above_lod_loq]))
+    checks_failed <- count_unique_values_above_lod_loq < min_unique_values
+  }
+
+  if (checks_failed) {
+    return(rep(NA_real_, length(biomarker_np)))
+  }
 
   if (!is.null(seed)) {
     set.seed(as.integer(seed))
   }
 
-  lower <- rep(0, length(biomarker_filled))
-  upper <- rep(0, length(biomarker_filled))
+  lower <- rep(0, length(biomarker_np))
+  upper <- rep(0, length(biomarker_np))
 
-  cat_below_lod <- biomarker_filled == -1
-  cat_between <- biomarker_filled == -2
-  cat_below_loq <- biomarker_filled == -3
+  lower[censored$below_lod] <- 0
+  upper[censored$below_lod] <- lod_v[censored$below_lod]
 
-  lower[cat_below_lod] <- 0
-  upper[cat_below_lod] <- lod_v[cat_below_lod]
+  lower[censored$between_lod_loq] <- lod_v[censored$between_lod_loq]
+  upper[censored$between_lod_loq] <- loq_v[censored$between_lod_loq]
 
-  lower[cat_between] <- lod_v[cat_between]
-  upper[cat_between] <- loq_v[cat_between]
+  lower[censored$below_loq] <- 0
+  upper[censored$below_loq] <- loq_v[censored$below_loq]
 
-  lower[cat_below_loq] <- 0
-  upper[cat_below_loq] <- loq_v[cat_below_loq]
+  values_np <- ifelse(censored_any, upper, biomarker_np)
+  fit_mask <- observed | censored_any
+  fit <- .fit_censored_lognorm(values_np[fit_mask], censored_any[fit_mask])
 
   cdf_lo <- plnorm(lower, meanlog = fit$mu, sdlog = fit$sigma)
   cdf_hi <- plnorm(upper, meanlog = fit$mu, sdlog = fit$sigma)
@@ -669,37 +783,55 @@
   u <- stats::runif(length(cdf_lo), min = cdf_lo, max = cdf_hi)
   imputed <- qlnorm(u, meanlog = fit$mu, sdlog = fit$sigma)
 
-  out <- biomarker_filled
-  out[censored] <- imputed[censored]
+  out <- biomarker_np
+  out[censored_any] <- imputed[censored_any]
+  out[result_null] <- NA_real_
 
   out
 }
 
-.dv_random_single_imputation_scalar_input <- function(biomarker, lod, loq, seed = NULL) {
-  lod_num <- .as_scalar_numeric(lod, "lod")
-  loq_num <- .as_scalar_numeric(loq, "loq")
-  .validate_thresholds(loq_num, lod_num)
+.dv_random_single_imputation_scalar_input <- function(
+  biomarker,
+  lod = NULL,
+  loq = NULL,
+  seed = NULL,
+  min_unique_values = 0,
+  min_observed_percentage = 0
+) {
+  lod_num <- if (is.null(lod)) NULL else .as_scalar_numeric(lod, "lod")
+  loq_num <- if (is.null(loq)) NULL else .as_scalar_numeric(loq, "loq")
+  .validate_thresholds(loq = loq_num, lod = lod_num)
 
   biomarker_np <- .series_to_numeric(biomarker)
   .to_series(.random_single_imputation_from_vectors(
     biomarker_np = biomarker_np,
-    lod_v = rep(lod_num, length(biomarker_np)),
-    loq_v = rep(loq_num, length(biomarker_np)),
-    seed = seed
+    lod_v = .threshold_vector(lod_num, length(biomarker_np)),
+    loq_v = .threshold_vector(loq_num, length(biomarker_np)),
+    seed = seed,
+    min_unique_values = min_unique_values,
+    min_observed_percentage = min_observed_percentage
   ))
 }
 
-.dv_random_single_imputation <- function(biomarker, lod, loq, seed = NULL) {
+.dv_random_single_imputation <- function(
+  biomarker,
+  lod = NULL,
+  loq = NULL,
+  seed = NULL,
+  min_unique_values = 0,
+  min_observed_percentage = 0
+) {
+  if (is.null(lod) && is.null(loq)) {
+    stop("at least one of lod or loq must be provided", call. = FALSE)
+  }
+
   biomarker_np <- .series_to_numeric(biomarker)
-  lod_v <- .series_to_numeric(lod)
-  loq_v <- .series_to_numeric(loq)
+  lod_v <- if (is.null(lod)) rep(NA_real_, length(biomarker_np)) else .series_to_numeric(lod)
+  loq_v <- if (is.null(loq)) rep(NA_real_, length(biomarker_np)) else .series_to_numeric(loq)
 
   .validate_same_length(biomarker_np, lod_v, loq_v)
 
-  if (any(is.na(lod_v)) || any(is.na(loq_v))) {
-    stop("lod and loq values must not be NA", call. = FALSE)
-  }
-  if (any(lod_v <= 0) || any(loq_v <= 0) || any(lod_v >= loq_v)) {
+  if (any((!is.na(lod_v) & lod_v <= 0) | (!is.na(loq_v) & loq_v <= 0) | (!is.na(lod_v) & !is.na(loq_v) & lod_v >= loq_v))) {
     stop("lod values must be > 0 and < loq values", call. = FALSE)
   }
 
@@ -707,7 +839,9 @@
     biomarker_np = biomarker_np,
     lod_v = lod_v,
     loq_v = loq_v,
-    seed = seed
+    seed = seed,
+    min_unique_values = min_unique_values,
+    min_observed_percentage = min_observed_percentage
   ))
 }
 
@@ -720,6 +854,7 @@
   normalize_specific_gravity = .dv_normalize_specific_gravity,
   total_lipid_concentration = .dv_total_lipid_concentration,
   standardize_lipid = .dv_standardize_lipid,
+  lab_sensitivity_dichotomization = .dv_lab_sensitivity_dichotomization,
   medium_bound_imputation_scalar_input = .dv_medium_bound_imputation_scalar_input,
   medium_bound_imputation = .dv_medium_bound_imputation,
   bin_decoding = .dv_bin_decoding,
