@@ -3,11 +3,23 @@
 The R implementation is intended to mirror the Python derived-variable behavior
 and consume the same shared conformance vectors.
 
-This section is a placeholder with the same structure as the Python docs. It
-will be filled in as the R API stabilizes.
+Use the R package when you want the same derived-variable functions from an R
+analysis workflow. The current R API is Polars-backed and exposes a single
+entrypoint:
 
-Planned pages:
+```r
+compehndly_apply(function_name, ..., .params = list())
+```
 
-- [Usage](usage.md)
-- [Functions](functions.md)
-- [Integration Patterns](integration.md)
+The `function_name` selects the derived-variable function. Positional or named
+Polars series supply the inputs, and `.params` supplies scalar function
+parameters.
+
+Start with:
+
+- [Usage](usage.md): install dependencies, load the local package, run examples,
+  and execute the R tests.
+- [Functions](functions.md): behavior notes for the R functions and parity with
+  Python.
+- [Integration Patterns](integration.md): R workflow patterns as the package
+  interface expands.
