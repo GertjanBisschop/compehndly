@@ -1,6 +1,6 @@
 [project]
 name = "compehndly-docs"
-version = "0.0.0"
+version = "0.0.1"
 description = "Documentation build configuration for compehndly."
 requires-python = ">=3.11"
 dependencies = []
