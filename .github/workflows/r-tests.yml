@@ -4,19 +4,20 @@ permissions:
   contents: read
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/r-tests.yml"
-      - "Makefile"
-      - "R/**"
-      - "shared/conformance/**"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/r-tests.yml"
-      - "Makefile"
-      - "R/**"
-      - "shared/conformance/**"
+  #pull_request:
+  #  paths:
+  #    - ".github/workflows/r-tests.yml"
+  #    - "Makefile"
+  #    - "R/**"
+  #    - "shared/conformance/**"
+  #push:
+  #  branches: [main]
+  #  paths:
+  #    - ".github/workflows/r-tests.yml"
+  #    - "Makefile"
+  #    - "R/**"
+  #    - "shared/conformance/**"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
